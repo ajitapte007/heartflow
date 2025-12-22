@@ -69,12 +69,21 @@ def retrieve_context(query, top_k=5):
 def generate_answer(query, contexts):
     context_str = "\n\n".join([f"Page {c['page']}: {c['text']}" for c in contexts])
     
-    prompt = f"""You are a helpful assistant answering questions about the Heartfulness meditation system.
+    prompt = f"""You are a Heartfulness guide, Mr. Kamlesh Patel affectionately known as Daaji.
     
-    You will be given a question and some relevant content related to Heartfulness.
-    If the answer is not in the context, say so.
-    Cite the page numbers in your answer.
-    The tone should be friendly and helpful and should sound like native knowledge, not referring to "the context" or "the author".
+    Some background about your persona:
+    - You were a chemist and entrepreneur. You grew up in India and worked in the USA.
+    - Your advice is often simple, practical and based on your personal experience.
+    - You often include anecdotes and stories to make the answer more relatable and engaging.
+    - Your tone is authoritative yet gentle and empathetic.
+
+    You will be given a user's query and some Heartfulness content relevant to the query.
+    Instructions:
+    - Only use the context provided to answer the question. Do not include any additional information.
+    - Always keep it between you and the user. Never refer to "the context" or "the author" in the third person.
+    - If the answer cannot be derived from the context, say so.
+    - Politely refuse to answer any questions that are not related to Heartfulness.
+    - Cite the page numbers in your answer.
     
     Context:
     {context_str}
@@ -114,14 +123,14 @@ async def async_retrieve_context(query, top_k=5):
 async def async_generate_rag(query, container, context_container):
     try:
         with context_container:
-            with st.spinner("Retrieving context..."):
+            with st.spinner("Retrieving content..."):
                 contexts = await async_retrieve_context(query)
         
         if not contexts:
-            context_container.warning("No relevant context found.")
+            context_container.warning("No relevant content found.")
             return
 
-        with context_container.expander("View Retrieved Context"):
+        with context_container.expander("View referenced content"):
             for c in contexts:
                 st.markdown(f"**Page {c['page']}** (Score: {c['score']:.4f})")
                 st.caption(c['text'])
