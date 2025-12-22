@@ -18,7 +18,7 @@ PINECONE_API_KEY = get_secret("PINECONE_API_KEY")
 
 INDEX_NAME = "heartflow"
 EMBEDDING_MODEL = "models/text-embedding-004"
-GENERATION_MODEL = "gemini-2.5-flash"
+GENERATION_MODEL = "gemini-2.5-flash-lite"
 
 # Setup
 if not GOOGLE_API_KEY or not PINECONE_API_KEY:
