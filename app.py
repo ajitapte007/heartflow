@@ -8,8 +8,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configuration
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+def get_secret(key):
+    if key in st.secrets:
+        return st.secrets[key]
+    return os.getenv(key)
+
+GOOGLE_API_KEY = get_secret("GOOGLE_API_KEY")
+PINECONE_API_KEY = get_secret("PINECONE_API_KEY")
+
 INDEX_NAME = "heartflow"
 EMBEDDING_MODEL = "models/text-embedding-004"
 GENERATION_MODEL = "gemini-2.5-flash"
