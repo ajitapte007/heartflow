@@ -47,14 +47,18 @@ def get_pdf_text(pdf_path, start_page=1, end_page=None):
             
     return pages_content
 
-def chunk_text(pages_content, chunk_size=1000):
+def chunk_text(pages_content, chunk_size=1024):
     chunks = []
     for page in pages_content:
-        page_num = page["page_number"]
-        paragraphs = page["text"].split('\n\n')
+        page_num = int(page["page_number"])
+        text = page["text"]
+        paragraphs = [
+            text[i:i + chunk_size]
+            for i in range(0, len(text), chunk_size)
+        ]
         for para in paragraphs:
             para = para.strip()
-            if len(para) < 20: continue
+            if len(para) < 50: continue
             chunks.append({"page": page_num, "text": para})
     return chunks
 
@@ -80,6 +84,7 @@ def main():
     parser.add_argument("pdf_path", help="Path to the PDF file")
     parser.add_argument("--start_page", type=int, default=1, help="Page number to start processing from (1-indexed)")
     parser.add_argument("--end_page", type=int, default=None, help="Page number to stop processing at (inclusive)")
+    parser.add_argument("--chunk_size", type=int, default=1024, help="Chunk size for text processing")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite the existing Pinecone index")
     args = parser.parse_args()
     
@@ -91,7 +96,7 @@ def main():
     pages = get_pdf_text(args.pdf_path, start_page=args.start_page, end_page=args.end_page)
     
     # 2. Chunk
-    chunks = chunk_text(pages)
+    chunks = chunk_text(pages, chunk_size=args.chunk_size)
     print(f"Total Chunks: {len(chunks)}")
     if not chunks: return
 
