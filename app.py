@@ -1,13 +1,14 @@
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import streamlit as st
 import os
+import json
 import google.generativeai as genai
 from pinecone import Pinecone
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
-# Configuration
 def get_secret(key):
     if key in st.secrets:
         return st.secrets[key]
@@ -20,7 +21,6 @@ INDEX_NAME = "heartflow"
 EMBEDDING_MODEL = "models/text-embedding-004"
 GENERATION_MODEL = "gemini-2.5-flash-lite"
 
-# Setup
 if not GOOGLE_API_KEY or not PINECONE_API_KEY:
     st.error("Please set GOOGLE_API_KEY and PINECONE_API_KEY in .env file")
     st.stop()
@@ -29,7 +29,7 @@ genai.configure(api_key=GOOGLE_API_KEY)
 pc = Pinecone(api_key=PINECONE_API_KEY)
 index = pc.Index(INDEX_NAME)
 
-st.set_page_config(page_title="HeartFlow", page_icon="📚", layout="wide")
+st.set_page_config(page_title="HeartFlow", page_icon="resources/hfn_favicon_white.png", layout="wide")
 
 def get_embedding(text):
     result = genai.embed_content(
@@ -46,7 +46,6 @@ def retrieve_context(query, top_k=5):
         st.error("Failed to generate embedding for the query.")
         return []
 
-    # Ensure it's a list
     if not isinstance(query_vector, list):
         query_vector = list(query_vector)
 
@@ -103,14 +102,29 @@ Answer:"""
 
 # UI
 st.title("HeartFlow")
-query = st.text_input("Ask a question about the Spiritual Anatomy book:")
 
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
+def load_questions(file_path):
+    try:
+        with open(file_path, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        st.error(f"Error loading JSON: {e}")
+        return []
 
-# ... (keep imports and setup)
+options = load_questions("resources/questions.json")
+selection = st.selectbox("Pick a suggested question:", options)
+default_text = ""
+if selection != options[0] and selection != options[-1]:
+    default_text = selection
+with st.form(key="query_form", clear_on_submit=False):
+    query = st.text_input(
+        "OR, ask your own:", 
+        value=default_text,
+        placeholder="Type your question here..."
+    )
+    
+    submit_button = st.form_submit_button(label="Submit")
 
-# Wrap blocking retrieval in executor
 async def async_retrieve_context(query, top_k=5):
     loop = asyncio.get_running_loop()
     with ThreadPoolExecutor() as pool:
@@ -128,11 +142,11 @@ async def async_generate_rag(query, container, context_container):
 
         with context_container.expander("View referenced content"):
             for c in contexts:
-                st.markdown(f"**Page {c['page']}** (Score: {c['score']:.4f})")
+                st.markdown(f"**Page {int(c['page'])}** (Score: {c['score']:.4f})")
                 st.caption(c['text'])
                 st.divider()
 
-        context_str = "\n\n".join([f"Page {c['page']}: {c['text']}" for c in contexts])
+        context_str = "\n\n".join([f"Page {int(c['page'])}: {c['text']}" for c in contexts])
         prompt = f"""You are a helpful assistant answering questions about the Heartfulness meditation system.
     
     You will be given a question and some relevant content related to Heartfulness.
@@ -147,10 +161,11 @@ async def async_generate_rag(query, container, context_container):
 
     Answer:"""
         
+        import google.generativeai as genai # Ensure genai is imported
         model = genai.GenerativeModel(GENERATION_MODEL)
         
         with container:
-            with st.spinner("Generating HFN answer..."):
+            with st.spinner("Generating guided answer..."):
                 response_stream = await model.generate_content_async(prompt, stream=True)
                 
                 full_text = ""
@@ -165,6 +180,7 @@ async def async_generate_rag(query, container, context_container):
 
 async def async_generate_direct(query, container):
     try:
+        import google.generativeai as genai
         prompt = f"""You are a helpful assistant.
 Question: {query}
 
@@ -172,7 +188,7 @@ Answer:"""
         model = genai.GenerativeModel(GENERATION_MODEL)
         
         with container:
-            with st.spinner("Generating Gemini answer..."):
+            with st.spinner("Generating general answer..."):
                 response_stream = await model.generate_content_async(prompt, stream=True)
                 
                 full_text = ""
@@ -188,19 +204,20 @@ async def main_loop(query):
     col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("HFN answer")
-        rag_context_spot = st.empty() # Placeholder for context/spinner
+        st.subheader("Guided answer")
+        rag_context_spot = st.empty() 
         rag_answer_spot = st.empty()
         
     with col2:
-        st.subheader("Gemini answer")
+        st.subheader("General answer")
         direct_answer_spot = st.empty()
 
-    # Run both pathways in parallel
     await asyncio.gather(
         async_generate_rag(query, rag_answer_spot, rag_context_spot),
         async_generate_direct(query, direct_answer_spot)
     )
 
-if query:
+if submit_button and query:
     asyncio.run(main_loop(query))
+elif submit_button and not query:
+    st.warning("Please enter a question before submitting.")
