@@ -1,7 +1,10 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
 import os
+import pandas as pd
 import json
 import google.generativeai as genai
 from pinecone import Pinecone
@@ -13,6 +16,13 @@ def get_secret(key):
     if key in st.secrets:
         return st.secrets[key]
     return os.getenv(key)
+
+# Initialize Google Sheets Connection
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+# Helper to create a unique hash for the question
+def get_hash(text):
+    return hashlib.sha256(text.encode()).hexdigest()[:10]
 
 GOOGLE_API_KEY = get_secret("GOOGLE_API_KEY")
 PINECONE_API_KEY = get_secret("PINECONE_API_KEY")
@@ -102,6 +112,7 @@ Answer:"""
 
 # UI
 st.title("HeartFlow")
+st.text("HeartFlow is your digital companion for exploring Daaji's book 'Spiritual Anatomy'. Let the wisdom flow from the pages to your practice.")
 
 def load_questions(file_path):
     try:
@@ -218,6 +229,46 @@ async def main_loop(query):
     )
 
 if submit_button and query:
+    st.session_state["current_query"] = query
     asyncio.run(main_loop(query))
 elif submit_button and not query:
     st.warning("Please enter a question before submitting.")
+
+if "current_query" in st.session_state:
+    st.divider()
+    st.subheader("Help us improve HeartFlow")
+
+    with st.form(key="rating_form"):
+        st.write(f"**Question:** {st.session_state.current_query}")
+        
+        rating = st.radio(
+            "Which response felt more helpful for your spiritual practice?",
+            options=[
+                "Guided answer", 
+                "General answer",
+                "Both were helpful",
+                "Neither was helpful"
+            ],
+            index=None,
+            help="Your feedback helps refine the HeartFlow guidance logic."
+        )
+        
+        feedback_submitted = st.form_submit_button("Submit Rating")
+
+        if feedback_submitted:
+            if rating:
+                new_row = pd.DataFrame([{
+                    "hashkey": get_hash(st.session_state.current_query),
+                    "question": st.session_state.current_query,
+                    "rating": rating
+                }])
+                try:
+                    sheet_id = st.secrets["connections"]["gsheets"]["spreadsheet"]
+                    existing_data = conn.read(worksheet="pilot")
+                    updated_df = pd.concat([existing_data, new_row], ignore_index=True)
+                    conn.update(worksheet="pilot", data=updated_df)
+                    st.success("Thank you! Your feedback has been recorded.")
+                except Exception as e:
+                    st.error(f"Could not save to Google Sheets: {e}")
+            else:
+                st.warning("Please select an option before submitting.")
