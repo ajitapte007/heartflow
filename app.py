@@ -234,6 +234,7 @@ if submit_button and query:
 elif submit_button and not query:
     st.warning("Please enter a question before submitting.")
 
+# Feedback form
 if "current_query" in st.session_state:
     st.divider()
     st.subheader("Help us improve HeartFlow")
@@ -242,7 +243,7 @@ if "current_query" in st.session_state:
         st.write(f"**Question:** {st.session_state.current_query}")
         
         rating = st.radio(
-            "Which response felt more helpful for your spiritual practice?",
+            "**1. Which response felt more helpful for your spiritual practice?**",
             options=[
                 "Guided answer", 
                 "General answer",
@@ -252,15 +253,31 @@ if "current_query" in st.session_state:
             index=None,
             help="Your feedback helps refine the HeartFlow guidance logic."
         )
+
+        reasons = st.multiselect(
+            "**2. What could be improved? (Select all that apply)**",
+            [
+                "Irrelevant", 
+                "Hard to understand", 
+                "Not enough detail", 
+                "Too verbose", 
+                "Inaccurate references"
+            ]
+        )
+    
+        other_text = st.text_area("**3. Additional comments:**", placeholder="Share your thoughts here...")
+        selected_reasons = ", ".join(reasons)
         
-        feedback_submitted = st.form_submit_button("Submit Rating")
+        feedback_submitted = st.form_submit_button("Submit Feedback")
 
         if feedback_submitted:
-            if rating:
+            if rating:  
                 new_row = pd.DataFrame([{
                     "hashkey": get_hash(st.session_state.current_query),
                     "question": st.session_state.current_query,
-                    "rating": rating
+                    "rating": rating,
+                    "reasons": selected_reasons,
+                    "comment": other_text
                 }])
                 try:
                     sheet_id = st.secrets["connections"]["gsheets"]["spreadsheet"]
