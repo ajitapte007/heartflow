@@ -1,6 +1,8 @@
 import os
-import argparse
 import time
+import argparse
+import re
+from uuid import uuid4
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pypdf import PdfReader
 from dotenv import load_dotenv
@@ -15,7 +17,6 @@ load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_ENV = os.getenv("PINECONE_ENV", "us-east-1")
-INDEX_NAME = "heartflow"
 EMBEDDING_MODEL = "models/text-embedding-004"
 
 if not GOOGLE_API_KEY or not PINECONE_API_KEY:
@@ -23,7 +24,7 @@ if not GOOGLE_API_KEY or not PINECONE_API_KEY:
 
 genai.configure(api_key=GOOGLE_API_KEY)
 
-def get_pdf_text(pdf_path, start_page=1, end_page=None):
+def get_pdf_text(pdf_path, start_page=1, end_page=None, title="PDF"):
     """
     Extracts text from PDF file, page by page.
     """
@@ -39,7 +40,7 @@ def get_pdf_text(pdf_path, start_page=1, end_page=None):
     print(f"Reading pages {start_page} to {end_index} ({len(pages_to_read)} pages).")
 
     # Reading pages is typically fast enough to be sequential, but we show progress
-    for i, page in enumerate(tqdm(pages_to_read, desc="Reading Pages", unit="page"), start=start_page):
+    for i, page in enumerate(tqdm(pages_to_read, desc=f"Reading {title}", unit="page"), start=start_page):
         text = page.extract_text()
         if text:
             text = text.strip()
@@ -47,9 +48,68 @@ def get_pdf_text(pdf_path, start_page=1, end_page=None):
             
     return pages_content
 
-def chunk_text(pages_content, chunk_size=1024):
+def get_markdown_text(md_path, start_page=1, end_page=None, title="Markdown"):
+    """
+    Extracts text from Markdown file, splitting by '## Page N'.
+    """
+    print(f"Reading Markdown: {md_path}")
+    try:
+        with open(md_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except Exception as e:
+        print(f"Error reading markdown file: {e}")
+        return []
+
+    # Split by '## Page <number>'
+    # resulting list will be [preamble, page_num_1, text_1, page_num_2, text_2, ...]
+    # or [preamble, text_1] if no page numbers found (fallback)
+    
+    pattern = r'(## Page \d+\n)'
+    parts = re.split(pattern, content)
+    
+    pages_content = []
+    
+    # Check if we have page markers. If not, treat whole file as one page (or page 1)
+    if len(parts) < 2:
+        print("No '## Page N' markers found. Treating as single page.")
+        return [{"page_number": 1, "text": content.strip()}]
+    
+    # Iterate through parts. 
+    # parts[0] is text before first page marker (often front matter).
+    # parts[1] is marker (e.g. "## Page 1\n"), parts[2] is text for that page, etc.
+    
+    # We can handle front matter as page 0 or skip it. Let's skip valid pages only.
+    
+    current_page_num = 0
+    
+    # Verify if parts[0] has content? for now skip
+    
+    for i in range(1, len(parts), 2):
+        marker = parts[i]
+        text = parts[i+1] if i+1 < len(parts) else ""
+        
+        # Extract number from marker
+        m = re.search(r'## Page (\d+)', marker)
+        if m:
+            page_num = int(m.group(1))
+            
+            # Filter ranges
+            if page_num < start_page:
+                continue
+            if end_page and page_num > end_page:
+                break # sorted assumption? or just continue
+                
+            pages_content.append({
+                "page_number": page_num,
+                "text": text.strip()
+            })
+            
+    print(f"Extracted {len(pages_content)} pages from Markdown.")
+    return pages_content
+
+def chunk_text(pages, chunk_size=1000, overlap=100):
     chunks = []
-    for page in pages_content:
+    for page in pages:
         page_num = int(page["page_number"])
         text = page["text"]
         paragraphs = [
@@ -79,21 +139,22 @@ def embed_batch(batch, batch_index):
         print(f"Error embedding batch {batch_index}: {e}")
         return batch_index, None
 
-def main():
-    parser = argparse.ArgumentParser(description="Ingest PDF into Pinecone using Gemini Embeddings (Parallel)")
-    parser.add_argument("pdf_path", help="Path to the PDF file")
-    parser.add_argument("--start_page", type=int, default=1, help="Page number to start processing from (1-indexed)")
-    parser.add_argument("--end_page", type=int, default=None, help="Page number to stop processing at (inclusive)")
-    parser.add_argument("--chunk_size", type=int, default=1024, help="Chunk size for text processing")
-    parser.add_argument("--overwrite", action="store_true", help="Overwrite the existing Pinecone index")
-    args = parser.parse_args()
-    
-    if not os.path.exists(args.pdf_path):
-        print("File not found.")
+def process_file(file_path, title, index, args, start_page=1, end_page=None):
+    """
+    Full pipeline for a single file (PDF or Markdown).
+    """
+    if not os.path.exists(file_path):
+        print(f"File not found: {file_path}")
         return
 
-    # 1. Read PDF
-    pages = get_pdf_text(args.pdf_path, start_page=args.start_page, end_page=args.end_page)
+    print(f"\n--- Processing: {title} ({file_path}) ---")
+
+    # 1. Read File
+    if file_path.lower().endswith('.md'):
+        pages = get_markdown_text(file_path, start_page=start_page, end_page=end_page, title=title)
+    else:
+        # Default to PDF
+        pages = get_pdf_text(file_path, start_page=start_page, end_page=end_page, title=title)
     
     # 2. Chunk
     chunks = chunk_text(pages, chunk_size=args.chunk_size)
@@ -108,87 +169,47 @@ def main():
     vectors_map = {} # batch_index -> embeddings
     
     print("Generating Embeddings (Parallel)...")
-    with ThreadPoolExecutor(max_workers=5) as executor: # Adjust workers based on rate limits
+    with ThreadPoolExecutor(max_workers=5) as executor:
         futures = {executor.submit(embed_batch, batch, i): i for i, batch in enumerate(batches)}
         
-        for future in tqdm(as_completed(futures), total=len(futures), desc="Embedding Batches"):
+        for future in tqdm(as_completed(futures), total=len(futures), desc=f"Embedding {title}"):
             batch_idx, embeddings = future.result()
             if embeddings:
                 vectors_map[batch_idx] = embeddings
             else:
-                # Handle failure (retry logic could go here)
                 pass
 
-    # Flatten embeddings in correct order
     all_embeddings = []
-    # We reconstruct the list based on batch index to match 'chunks' list order
     sorted_batch_indices = sorted(vectors_map.keys())
+    
+    if len(sorted_batch_indices) != len(batches):
+         print(f"Warning: Only {len(sorted_batch_indices)}/{len(batches)} batches succeeded.")
+         
+    valid_chunks = []
+    valid_embeddings = []
+    
     for idx in sorted_batch_indices:
-        all_embeddings.extend(vectors_map[idx])
+        start_chunk_idx = idx * batch_size
+        actual_batch_len = len(vectors_map[idx])
         
-    if len(all_embeddings) != len(chunks):
-        print(f"Warning: Mismatch between chunks ({len(chunks)}) and embeddings ({len(all_embeddings)}). Some batches may have failed.")
-        # Identify valid chunks? For now, we only proceed if we have a way to align.
-        # Actually, since we keyed by batch index, we know which ones succeeded.
-        # But if a batch completely failed, we lose those chunks. 
-        # For this script, we'll just skip the failed batches' chunks.
-        
-        valid_chunks = []
-        valid_embeddings = []
-        for idx in sorted_batch_indices:
-            start_chunk_idx = idx * batch_size
-            end_chunk_idx = start_chunk_idx + len(vectors_map[idx]) # length of this batch's embeddings
-            # (Should equal length of the text batch provided)
+        batch_chunks = chunks[start_chunk_idx : start_chunk_idx + actual_batch_len]
+        valid_chunks.extend(batch_chunks)
+        valid_embeddings.extend(vectors_map[idx])
             
-            # Re-slice the original chunk list to get the matching chunks
-            batch_chunks = chunks[start_chunk_idx : start_chunk_idx + len(vectors_map[idx])]
-            valid_chunks.extend(batch_chunks)
-            valid_embeddings.extend(vectors_map[idx])
-            
-        chunks = valid_chunks
-        all_embeddings = valid_embeddings
+    chunks = valid_chunks
+    all_embeddings = valid_embeddings
 
-    # 4. Upsert (Parallel)
-    pc = Pinecone(api_key=PINECONE_API_KEY)
+    # 4. Upsert
+    print(f"Upserting {len(chunks)} vectors to Pinecone...")
     
-    # Check if index exists
-    if INDEX_NAME not in pc.list_indexes().names():
-        print(f"Creating index {INDEX_NAME}...")
-        try:
-            pc.create_index(
-                name=INDEX_NAME, 
-                dimension=768, 
-                metric="cosine", 
-                spec=ServerlessSpec(cloud="aws", region=PINECONE_ENV)
-            )
-            while not pc.describe_index(INDEX_NAME).status['ready']:
-                time.sleep(1)
-        except Exception as e:
-            print(f"Error creating index: {e}")
-            return
-            
-    index = pc.Index(INDEX_NAME)
-
-    # Handle Overwrite
-    if args.overwrite:
-        print(f"Overwrite enabled: Clearing all vectors from index {INDEX_NAME}...")
-        try:
-            index.delete(delete_all=True)
-            print("Index cleared.")
-        except Exception as e:
-            print(f"Error clearing index: {e}")
-
-    
-    print("Upserting to Pinecone...")
-    
-    # Prepare vector tuples
     vector_data = []
+    book_slug = title.lower().replace(" ", "_")
+    
     for i, (chunk, vec) in enumerate(zip(chunks, all_embeddings)):
-        _id = f"p{chunk['page']}_{i}"
-        meta = {"text": chunk['text'], "page": chunk['page']}
+        _id = f"{book_slug}_p{chunk['page']}_{i}"
+        meta = {"text": chunk['text'], "page": chunk['page'], "source": title}
         vector_data.append((_id, vec, meta))
         
-    # Upsert batches
     upsert_batch_size = 100
     upsert_batches = [vector_data[i:i+upsert_batch_size] for i in range(0, len(vector_data), upsert_batch_size)]
 
@@ -198,10 +219,86 @@ def main():
 
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = [executor.submit(upsert_batch_func, b) for b in upsert_batches]
-        for _ in tqdm(as_completed(futures), total=len(futures), desc="Upserting"):
+        for _ in tqdm(as_completed(futures), total=len(futures), desc=f"Upserting {title}"):
             pass
             
-    print("Ingestion complete!")
+    print(f"Completed: {title}")
+
+def main():
+    parser = argparse.ArgumentParser(description="Ingest PDF(s) into Pinecone using Gemini Embeddings")
+    
+    parser.add_argument("--config", type=str, required=True, help="Path to JSON config file (list of dicts with: pdf_path, start_page, end_page, title)")
+    parser.add_argument("--chunk_size", type=int, default=1024, help="Chunk size for text processing")
+    parser.add_argument("--overwrite", action="store_true", help="Clear the ENTIRE index before upserting (Caution!)")
+    parser.add_argument("--index_name", type=str, default="hfn_nvc", help="Pinecone index name")
+    args = parser.parse_args()
+    
+    # Setup Pinecone Index ONCE
+    pc = Pinecone(api_key=PINECONE_API_KEY)
+    
+    index_name = args.index_name
+    
+    if index_name not in pc.list_indexes().names():
+        print(f"Creating index {index_name}...")
+        try:
+            pc.create_index(
+                name=index_name, 
+                dimension=768, 
+                metric="cosine", 
+                spec=ServerlessSpec(cloud="aws", region=PINECONE_ENV)
+            )
+            while not pc.describe_index(index_name).status['ready']:
+                time.sleep(1)
+        except Exception as e:
+            print(f"Error creating index: {e}")
+            return
+            
+    index = pc.Index(index_name)
+
+    # Handle Overwrite ONCE
+    if args.overwrite:
+        print(f"Overwrite enabled: Clearing all vectors from index {index_name}...")
+        try:
+            index.delete(delete_all=True)
+            print("Index cleared.")
+        except Exception as e:
+            print(f"Error clearing index: {e}")
+
+    # Determine Processing List
+    tasks = []
+    import json
+    
+    if not os.path.exists(args.config):
+        print(f"Config file not found: {args.config}")
+        return
+    try:
+        with open(args.config, 'r') as f:
+            config_data = json.load(f)
+            # Expecting a list of dicts
+            if isinstance(config_data, list):
+                tasks = config_data
+            else:
+                print("Config file must contain a JSON list of objects.")
+                return
+    except Exception as e:
+        print(f"Error reading config: {e}")
+        return
+
+    for task in tasks:
+        # Support "pdf_path" (legacy) or "file_path" or generic "path"
+        file_path = task.get("pdf_path") or task.get("file_path") or task.get("path")
+        if not file_path: continue
+        
+        title = task.get("title")
+        if not title:
+             title = os.path.splitext(os.path.basename(file_path))[0].replace("_", " ").title()
+        
+        start = task.get("start_page", 1)
+        end = task.get("end_page", None)
+        
+        process_file(file_path, title, index, args, start_page=start, end_page=end)
+
+    print("\nAll Ingestion Tasks Complete!")
 
 if __name__ == "__main__":
     main()

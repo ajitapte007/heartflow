@@ -1,0 +1,32 @@
+[
+    {
+        "pdf_path": "literature/spiritual_anatomy.pdf",
+        "title": "Spiritual Anatomy",
+        "start_page": 17,
+        "end_page": 249
+    },
+    {
+        "pdf_path": "literature/nvc.md",
+        "title": "Nonviolent Communication",
+        "start_page": 22,
+        "end_page": 110
+    },
+    {
+        "pdf_path": "literature/basics_of_sahaj_marg.pdf",
+        "title": "Basics of Sahaj Marg",
+        "start_page": 1,
+        "end_page": 39
+    },
+    {
+        "pdf_path": "literature/reality_at_dawn_2.pdf",
+        "title": "Reality at Dawn",
+        "start_page": 6,
+        "end_page": 71
+    },
+    {
+        "pdf_path": "literature/truth_eternal.pdf",
+        "title": "Truth Eternal",
+        "start_page": 4,
+        "end_page": 102
+    }
+]

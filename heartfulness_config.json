@@ -1,0 +1,20 @@
+[
+    {
+        "pdf_path": "literature/truth_eternal.pdf",
+        "title": "Truth Eternal",
+        "start_page": 4,
+        "end_page": 102
+    },
+    {
+        "pdf_path": "literature/reality_at_dawn.pdf",
+        "title": "Reality at Dawn",
+        "start_page": 7,
+        "end_page": 94
+    },
+    {
+        "pdf_path": "literature/spiritual_anatomy.pdf",
+        "title": "Spiritual Anatomy",
+        "start_page": 17,
+        "end_page": 249
+    }
+]

@@ -27,7 +27,8 @@ def get_hash(text):
 GOOGLE_API_KEY = get_secret("GOOGLE_API_KEY")
 PINECONE_API_KEY = get_secret("PINECONE_API_KEY")
 
-INDEX_NAME = "heartflow"
+INDEX_HFN = "heartfulness"
+INDEX_NVC = "nvc"
 EMBEDDING_MODEL = "models/text-embedding-004"
 GENERATION_MODEL = "gemini-2.5-flash-lite"
 
@@ -37,7 +38,8 @@ if not GOOGLE_API_KEY or not PINECONE_API_KEY:
 
 genai.configure(api_key=GOOGLE_API_KEY)
 pc = Pinecone(api_key=PINECONE_API_KEY)
-index = pc.Index(INDEX_NAME)
+index_hfn = pc.Index(INDEX_HFN)
+index_nvc = pc.Index(INDEX_NVC)
 
 st.set_page_config(page_title="HeartFlow", page_icon="resources/hfn_favicon_white.png", layout="wide")
 
@@ -49,7 +51,7 @@ def get_embedding(text):
     )
     return result['embedding']
 
-def retrieve_context(query, top_k=5):
+def retrieve_context(query, top_k=3):
     query_vector = get_embedding(query)
     
     if not query_vector:
@@ -59,47 +61,41 @@ def retrieve_context(query, top_k=5):
     if not isinstance(query_vector, list):
         query_vector = list(query_vector)
 
-    results = index.query(
-        vector=query_vector,
-        top_k=top_k,
-        include_metadata=True
-    )
-    
+    def query_index(index_obj, name):
+        try:
+             results = index_obj.query(
+                vector=query_vector,
+                top_k=top_k,
+                include_metadata=True
+            )
+             return results['matches']
+        except Exception as e:
+            print(f"Error querying {name}: {e}")
+            return []
+
+    # Query both indices in parallel
+    matches = []
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        future_hfn = executor.submit(query_index, index_hfn, "Heartfulness")
+        future_nvc = executor.submit(query_index, index_nvc, "NVC")
+        
+        matches.extend(future_hfn.result())
+        matches.extend(future_nvc.result())
+
+    # Format contexts
     contexts = []
-    for match in results['matches']:
+    for match in matches:
         metadata = match['metadata']
         contexts.append({
             "text": metadata['text'],
-            "page": metadata['page'],
+            "page": int(metadata['page']),
+            "source": metadata.get('source', 'Unknown'),
             "score": match['score']
         })
+    
     return contexts
 
-def generate_answer(query, contexts):
-    context_str = "\n\n".join([f"Page {c['page']}: {c['text']}" for c in contexts])
-    
-    prompt = f"""You are a Heartfulness guide, Mr. Kamlesh Patel affectionately known as Daaji.
-    
-    You will be given a user's query and some Heartfulness content relevant to the query.
-    Instructions:
-    - Maintain a tone that is authoritative yet gentle and empathetic. The answer should sound simple and practical.
-    - Include anecdotes and stories from the context wherever you can and if relevant to the query, to make the answer more relatable and engaging.
-    - Prefer to use the context provided to answer the question. Include additional information only as support if needed.
-    - Always keep it between you and the user. Never refer to "the context" or "the author" in the third person.
-    - If the answer cannot be derived from the context, say so.
-    - Politely refuse to answer any questions that are not related to Heartfulness.
-    - Cite the page numbers in your answer.
-    
-    Context:
-    {context_str}
 
-    Question: {query}
-
-    Answer:"""
-
-    model = genai.GenerativeModel(GENERATION_MODEL)
-    response = model.generate_content(prompt, stream=True)
-    return response
 
 def generate_direct_answer(query):
     prompt = f"""You are a helpful assistant.
@@ -112,7 +108,7 @@ Answer:"""
 
 # UI
 st.title("HeartFlow")
-st.text("HeartFlow is your digital companion for exploring Daaji's book 'Spiritual Anatomy'. Let the wisdom flow from the pages to your practice.")
+st.text("Bring the wisdom of the Heartfulness literature into your daily life.")
 
 def load_questions(file_path):
     try:
@@ -139,7 +135,8 @@ with st.form(key="query_form", clear_on_submit=False):
 async def async_retrieve_context(query, top_k=5):
     loop = asyncio.get_running_loop()
     with ThreadPoolExecutor() as pool:
-        return await loop.run_in_executor(pool, retrieve_context, query, top_k)
+        # Pass top_k=3 (per index) to get 6 total
+        return await loop.run_in_executor(pool, retrieve_context, query, 3)
 
 async def async_generate_rag(query, container, context_container):
     try:
@@ -153,17 +150,26 @@ async def async_generate_rag(query, container, context_container):
 
         with context_container.expander("View referenced content"):
             for c in contexts:
-                st.markdown(f"**Page {int(c['page'])}** (Score: {c['score']:.4f})")
+                st.markdown(f"**Source**: {c.get('source', 'Unknown')} | **Page {int(c['page'])}** (Score: {c['score']:.4f})")
                 st.caption(c['text'])
                 st.divider()
 
-        context_str = "\n\n".join([f"Page {int(c['page'])}: {c['text']}" for c in contexts])
-        prompt = f"""You are a helpful assistant answering questions about the Heartfulness meditation system.
-    
-    You will be given a question and some relevant content related to Heartfulness.
-    If the answer is not in the context, say so.
-    Cite the page numbers in your answer.
-    The tone should be friendly and helpful and should sound like native knowledge, not referring to "the context" or "the author".
+        context_str = "\n\n".join([f"Source: {c.get('source', 'Unknown')}, Page {int(c['page'])}: {c['text']}" for c in contexts])
+        prompt = f"""You are a Heartfulness guide, Mr. Kamlesh Patel, affectionately known as Daaji. You are an expert in Sahaj Marg (Heartfulness) and also integrate the principles of Nonviolent Communication (NVC) to help seekers bridge their inner spiritual state with their outer relationships.
+
+    You will be provided with context from two indices:
+    1. [Heartfulness Content]: Focusing on meditation, cleaning, and spiritual evolution.
+    2. [NVC Content]: Focusing on needs, feelings, and empathetic communication.
+
+    Instructions:
+    - Tone & Voice: Maintain an authoritative yet gentle, empathetic, and fatherly tone. Your guidance should be simple, practical, and deeply rooted in the heart.
+    - Synthesis: Identify whether the query requires internal spiritual guidance (HFN), external communication tools (NVC), or both. Use NVC tools to help the user express the "Inner Peace" found through Heartfulness.
+    - Narrative: Include anecdotes or stories from the provided context whenever possible to make the answer relatable.
+    - Perspective: Always keep the conversation between "you" (Daaji) and "the user." Do not say "the context says" or "the text mentions." Speak as if this wisdom is your own.
+    - Relevance: If the query is unrelated to either Heartfulness or compassionate living/NVC, politely decline to answer.
+    - Citation: Cite your sources clearly using the name of the book and page number, formatted like (Spiritual Anatomy, Page 123).
+
+    Example Integration: If a user asks about anger, use Heartfulness context to explain cleaning the "complexities" of the heart, and use NVC to explain how to identify the "unmet need" behind that anger.
     
     Context:
     {context_str}
