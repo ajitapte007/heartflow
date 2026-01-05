@@ -108,7 +108,7 @@ Answer:"""
 
 # UI
 st.title("HeartFlow")
-st.text("Bring the wisdom of the Heartfulness literature into your daily life.")
+st.text("Explore the wisdom in the Heartfulness literature, one question at a time.")
 
 def load_questions(file_path):
     try:
@@ -116,13 +116,29 @@ def load_questions(file_path):
             return json.load(f)
     except Exception as e:
         st.error(f"Error loading JSON: {e}")
-        return []
+        return {}
 
-options = load_questions("resources/questions.json")
-selection = st.selectbox("Pick a suggested question:", options)
-default_text = ""
-if selection != options[0] and selection != options[-1]:
-    default_text = selection
+qa_data = load_questions("resources/questions.json")
+
+# 1. Category Selection
+categories = list(qa_data.keys()) if isinstance(qa_data, dict) else []
+selected_category = st.selectbox(
+    "1. Filter by Topic:", 
+    categories, 
+    index=None, 
+    placeholder="Select a topic..."
+)
+
+# 2. Question Selection
+questions = qa_data.get(selected_category, []) if isinstance(qa_data, dict) and selected_category else []
+selection = st.selectbox(
+    "2. Pick a question:", 
+    questions, 
+    index=None, 
+    placeholder="Select a question..."
+)
+
+default_text = selection if selection else ""
 with st.form(key="query_form", clear_on_submit=False):
     query = st.text_input(
         "OR, ask your own:", 
@@ -162,9 +178,13 @@ async def async_generate_rag(query, container, context_container):
     2. [NVC Content]: Focusing on needs, feelings, and empathetic communication.
 
     Instructions:
-    - Tone & Voice: Maintain an authoritative yet gentle, empathetic, and fatherly tone. Your guidance should be simple, practical, and deeply rooted in the heart.
-    - Synthesis: Identify whether the query requires internal spiritual guidance (HFN), external communication tools (NVC), or both. Use NVC tools to help the user express the "Inner Peace" found through Heartfulness.
-    - Narrative: Include anecdotes or stories from the provided context whenever possible to make the answer relatable.
+    - Tone & Voice: Maintain a professional, wise, and gentle tone. Be empathetic but avoid overly familiar or patronizing forms of address like "My dear child." Your guidance should be simple, practical, and deeply rooted in the heart.
+    - Structure: Adapt the structure to the nature of the query:
+        - **For Complex/Life Queries** (e.g., relationships, stress, ego): Usage of the split structure (**"Inner Work"** and **"Outer Expression"**) is highly recommended to provide a complete answer.
+        - **For Technical/Specific Queries** (e.g., "What is cleaning?", "Where is Point A?"): Focus directly on addressing the core question without forcing a division or unnecessary NVC content.
+        - **Summary**: For complex answers, end with a **"Summary"** blending the perspectives.
+    - Integration: Only integrate NVC concepts if they genuinely add value to the answer. Do not shoe-horn them into purely technical spiritual questions.
+    - Narrative: Include anecdotes or stories from the provided context whenever possible. However, ALWAYS narrate them in the third person (e.g., "There was once a student who...", "One master observed...") even if the source uses "I". Do not use the first person ("I") for anecdotes to avoid confusion between different source authors.
     - Perspective: Always keep the conversation between "you" (Daaji) and "the user." Do not say "the context says" or "the text mentions." Speak as if this wisdom is your own.
     - Relevance: If the query is unrelated to either Heartfulness or compassionate living/NVC, politely decline to answer.
     - Citation: Cite your sources clearly using the name of the book and page number, formatted like (Spiritual Anatomy, Page 123).
