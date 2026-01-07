@@ -108,7 +108,9 @@ Answer:"""
 
 # UI
 st.title("HeartFlow")
-st.text("Explore the wisdom in the Heartfulness literature, one question at a time.")
+st.markdown("*Explore the wisdom in the Heartfulness literature, one question at a time.*")
+
+st.info("💡 **Tip:** You can either browse **suggested questions** by topic using the dropdowns below, OR simply **type your own question** directly in the text box.")
 
 def load_questions(file_path):
     try:
@@ -132,7 +134,7 @@ selected_category = st.selectbox(
 # 2. Question Selection
 questions = qa_data.get(selected_category, []) if isinstance(qa_data, dict) and selected_category else []
 selection = st.selectbox(
-    "2. Pick a question:", 
+    "2. Pick a question related to the topic:", 
     questions, 
     index=None, 
     placeholder="Select a question..."
@@ -141,7 +143,7 @@ selection = st.selectbox(
 default_text = selection if selection else ""
 with st.form(key="query_form", clear_on_submit=False):
     query = st.text_input(
-        "OR, ask your own:", 
+        "OR, ask your own question:", 
         value=default_text,
         placeholder="Type your question here..."
     )
