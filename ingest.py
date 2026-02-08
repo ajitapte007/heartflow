@@ -17,7 +17,7 @@ load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_ENV = os.getenv("PINECONE_ENV", "us-east-1")
-EMBEDDING_MODEL = "models/text-embedding-004"
+EMBEDDING_MODEL = "models/gemini-embedding-001"
 
 if not GOOGLE_API_KEY or not PINECONE_API_KEY:
     raise ValueError("Please set GOOGLE_API_KEY and PINECONE_API_KEY in .env file")
@@ -243,7 +243,7 @@ def main():
         try:
             pc.create_index(
                 name=index_name, 
-                dimension=768, 
+                dimension=3072, 
                 metric="cosine", 
                 spec=ServerlessSpec(cloud="aws", region=PINECONE_ENV)
             )

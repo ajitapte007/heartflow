@@ -29,7 +29,7 @@ PINECONE_API_KEY = get_secret("PINECONE_API_KEY")
 
 INDEX_HFN = "heartfulness"
 INDEX_NVC = "nvc"
-EMBEDDING_MODEL = "models/text-embedding-004"
+EMBEDDING_MODEL = "models/gemini-embedding-001"
 GENERATION_MODEL = "gemini-2.5-flash-lite"
 
 if not GOOGLE_API_KEY or not PINECONE_API_KEY:
